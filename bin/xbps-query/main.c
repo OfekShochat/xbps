@@ -272,7 +272,7 @@ main(int argc, char **argv)
 
 	} else if (list_pkgs) {
 		/* list available pkgs */
-		rv = list_pkgs_pkgdb(&xh);
+		rv = list_pkgs_pkgdb(&xh, 5);
 
 	} else if (orphans) {
 		/* list pkg orphans */

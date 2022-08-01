@@ -30,6 +30,7 @@
 #include <errno.h>
 #include <string.h>
 #include <assert.h>
+#include <time.h>
 
 #include "defs.h"
 
@@ -37,12 +38,13 @@ struct list_pkgver_cb {
 	unsigned int pkgver_len;
 	unsigned int maxcols;
 	char *linebuf;
+	unsigned int min_unused;
 };
 
 int
-list_pkgs_in_dict(struct xbps_handle *xhp UNUSED,
+list_pkgs_in_dict(struct xbps_handle *xhp,
 		  xbps_object_t obj,
-		  const char *key UNUSED,
+		  const char *key,
 		  void *arg,
 		  bool *loop_done UNUSED)
 {
@@ -50,6 +52,26 @@ list_pkgs_in_dict(struct xbps_handle *xhp UNUSED,
 	const char *pkgver = NULL, *short_desc = NULL, *state_str = NULL;
 	unsigned int len;
 	pkg_state_t state;
+	struct stat filestats;
+	time_t unused_for;
+	time_t max_access = 0;
+        xbps_object_t file;
+
+	xbps_dictionary_t pkg_files;
+	xbps_object_iterator_t iter;
+
+	pkg_files = xbps_pkgdb_get_pkg_files(xhp, key);
+	iter = xbps_dictionary_iterator(pkg_files);
+
+	while ((file = xbps_object_iterator_next(iter))) {
+		stat(file, &filestats);
+		if (filestats.st_atime > max_access)
+			max_access = filestats.st_atime;
+	}
+
+	unused_for = (time(0) - max_access) / 86400;
+	if (unused_for < lpc->min_unused)
+		return 0;
 
 	xbps_dictionary_get_cstring_nocopy(obj, "pkgver", &pkgver);
 	xbps_dictionary_get_cstring_nocopy(obj, "short_desc", &short_desc);
@@ -68,17 +90,17 @@ list_pkgs_in_dict(struct xbps_handle *xhp UNUSED,
 		state_str = "??";
 
 	if (lpc->linebuf == NULL) {
-		printf("%s %-*s %s\n",
+		printf("%s %-*s %s (access: %ld days)\n",
 			state_str,
 			lpc->pkgver_len, pkgver,
-			short_desc);
+			short_desc, unused_for);
 		return 0;
 	}
 
-	len = snprintf(lpc->linebuf, lpc->maxcols, "%s %-*s %s",
+	len = snprintf(lpc->linebuf, lpc->maxcols, "%s %-*s %s (access: %ld days)",
 	    state_str,
 		lpc->pkgver_len, pkgver,
-		short_desc);
+		short_desc, unused_for);
 	/* add ellipsis if the line was truncated */
 	if (len >= lpc->maxcols && lpc->maxcols > 4) {
 		for (unsigned int j = 0; j < 3; j++)
@@ -163,13 +185,14 @@ list_orphans(struct xbps_handle *xhp)
 }
 
 int
-list_pkgs_pkgdb(struct xbps_handle *xhp)
+list_pkgs_pkgdb(struct xbps_handle *xhp, unsigned int min_unused)
 {
 	struct list_pkgver_cb lpc;
 
 	lpc.pkgver_len = find_longest_pkgver(xhp, NULL);
 	lpc.maxcols = get_maxcols();
 	lpc.linebuf = NULL;
+	lpc.min_unused = min_unused;
 	if (lpc.maxcols > 0) {
 		lpc.linebuf = malloc(lpc.maxcols);
 		if (lpc.linebuf == NULL)
